@@ -2,11 +2,13 @@ import Dexie, { type Table } from 'dexie';
 import type { TunnelFace } from '../types/face';
 import type { JointSet } from '../types/joint';
 import type { RockMassGrade } from '../types/grade';
+import { GRADE_SUPPORT } from '../types/grade';
 import type { WaterInflow } from '../types/water';
+import type { Forecast, ReconExplanation } from '../types/forecast';
 import { newId } from './id';
 
 export const DB_NAME = 'gbtunnelface';
-export const DB_VERSION = 2;
+export const DB_VERSION = 3;
 export const LS_VERSION_KEY = 'gbtunnelface:db-version';
 
 class TunnelFaceDB extends Dexie {
@@ -14,6 +16,8 @@ class TunnelFaceDB extends Dexie {
   joints!: Table<JointSet, string>;
   grades!: Table<RockMassGrade, string>;
   waters!: Table<WaterInflow, string>;
+  forecasts!: Table<Forecast, string>;
+  explanations!: Table<ReconExplanation, string>;
 
   constructor() {
     super(DB_NAME);
@@ -52,6 +56,11 @@ class TunnelFaceDB extends Dexie {
             if (row.chainage === undefined) row.chainage = 0;
           });
       });
+    // v3：新增超前地质预报与差异说明两表（预报编号唯一，重复录入不重复记账）
+    this.version(3).stores({
+      forecasts: 'id, &code, mileageStart, mileageEnd, issuedAt',
+      explanations: 'id, forecastId, explainedAt',
+    });
   }
 }
 
@@ -201,6 +210,22 @@ export async function ensureSeedData(): Promise<void> {
       manualAdjusted: false,
       judgedAt: now - 2 * day,
     },
+    {
+      id: newId('grade'),
+      faceId: face2,
+      grade: 'Ⅴ',
+      bqValue: 226,
+      rqd: 41,
+      jv: 17.5,
+      kv: 0.32,
+      groundwater: '潮湿',
+      spanWidth: 12.6,
+      correction: 0.2,
+      correctedBq: 206,
+      supportSuggestion: GRADE_SUPPORT['Ⅴ'],
+      manualAdjusted: false,
+      judgedAt: now - 6 * hour,
+    },
   ];
 
   const waters: WaterInflow[] = [
@@ -242,10 +267,51 @@ export async function ensureSeedData(): Promise<void> {
     },
   ];
 
-  await db.transaction('rw', db.faces, db.joints, db.grades, db.waters, async () => {
+  /** 示范预报：一份相符、一份级别差两级待说明、一段未开挖待编录 */
+  const forecasts: Forecast[] = [
+    {
+      id: newId('fc'),
+      code: 'YB-2026-12',
+      mileageStart: 12480,
+      mileageEnd: 12483,
+      predictedGrade: 'Ⅲ',
+      predictedWater: '较大',
+      issuedAt: now - 3 * day,
+      forecaster: '超前预报组',
+      note: 'TSP 第 12 期',
+      updatedAt: now - 3 * day,
+    },
+    {
+      id: newId('fc'),
+      code: 'YB-2026-13',
+      mileageStart: 12483,
+      mileageEnd: 12486,
+      predictedGrade: 'Ⅲ',
+      predictedWater: '干燥',
+      issuedAt: now - day,
+      forecaster: '超前预报组',
+      note: 'TSP 第 13 期',
+      updatedAt: now - day,
+    },
+    {
+      id: newId('fc'),
+      code: 'YB-2026-14',
+      mileageStart: 12486,
+      mileageEnd: 12489,
+      predictedGrade: 'Ⅳ',
+      predictedWater: '少量',
+      issuedAt: now - 2 * hour,
+      forecaster: '超前预报组',
+      note: 'TSP 第 14 期',
+      updatedAt: now - 2 * hour,
+    },
+  ];
+
+  await db.transaction('rw', db.faces, db.joints, db.grades, db.waters, db.forecasts, async () => {
     await db.faces.bulkPut(faces);
     await db.joints.bulkPut(joints);
     await db.grades.bulkPut(grades);
     await db.waters.bulkPut(waters);
+    await db.forecasts.bulkPut(forecasts);
   });
 }

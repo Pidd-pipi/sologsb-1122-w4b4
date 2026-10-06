@@ -1,6 +1,6 @@
 # sologsb-1122 隧道掌子面地质编录台（gbtunnelface）
 
-面向隧道施工地质人员的掌子面编录工作台：逐循环编录围岩级别、岩性、节理产状与涌水情况，绘制岩性素描并用数字表示结构面，实时按 BQ 指标判定围岩级别并给出支护建议。纯前端单页应用，数据全部保存在浏览器本地。
+面向隧道施工地质人员的掌子面编录工作台：逐循环编录围岩级别、岩性、节理产状与涌水情况，绘制岩性素描并用数字表示结构面，实时按 BQ 指标判定围岩级别并给出支护建议；接入超前地质预报成果，按编号与里程段自动认领编录逐循环对账。纯前端单页应用，数据全部保存在浏览器本地。
 
 ## Docker 一键启动（推荐）
 
@@ -58,12 +58,12 @@ sologsb-1122/
         ├── main.ts
         ├── App.vue
         ├── router/index.ts
-        ├── types/{face,joint,grade,water}.ts
-        ├── stores/{face,joint,grade}Store.ts
+        ├── types/{face,joint,grade,water,forecast}.ts
+        ├── stores/{face,joint,grade,forecast}Store.ts
         ├── components/common/{SketchCanvas,JointPolarPlot,GradeTag,FaceCard}.vue
         ├── hooks/{useFaceFilter,useGradeCalc}.ts
-        ├── pages/{FaceList,FaceDetail,JointEntry,WaterView,GradeJudge}.vue
-        └── utils/{db,geoMath,id}.ts
+        ├── pages/{FaceList,FaceDetail,JointEntry,WaterView,GradeJudge,ForecastRecon}.vue
+        └── utils/{db,geoMath,id,reconcile}.ts
 ```
 
 ## 页面与路由
@@ -75,17 +75,19 @@ sologsb-1122/
 | `/faces/:id/joints` | 节理产状录入：极点图/玫瑰图、同组产状合并、异常倾角提示 | JointSet |
 | `/faces/:id/water` | 涌水记录与沿里程趋势折线，标记突变点与建议措施 | WaterInflow |
 | `/grade/:faceId` | 围岩级别判定：逐项输入 RQD/Jv/Kv/出水状态，实时算级别与支护建议，可人工修正并保存 | RockMassGrade、TunnelFace |
+| `/forecast` | 预报对账：预报成果录入（编号幂等）、按编号/里程段认领编录、级别与涌水比对、差异说明收口 | Forecast、ReconExplanation、TunnelFace、RockMassGrade、WaterInflow |
 
 `/` 重定向到 `/faces`，未匹配路由同样兜底到 `/faces`。
 
 ## 数据存储说明
 
-- 数据库名 `gbtunnelface`，当前结构版本 **v2**（`localStorage['gbtunnelface:db-version']` 记录）。
-- 四张表：`faces`（掌子面）、`joints`（节理组）、`grades`（围岩级别判定）、`waters`（涌水记录）。
+- 数据库名 `gbtunnelface`，当前结构版本 **v3**（`localStorage['gbtunnelface:db-version']` 记录）。
+- 六张表：`faces`（掌子面）、`joints`（节理组）、`grades`（围岩级别判定）、`waters`（涌水记录）、`forecasts`（超前地质预报，编号唯一索引）、`explanations`（差异说明，一份预报一条账）。
 - v1 → v2 迁移：为老掌子面补 `attitude`、`mileageRange`，为级别记录补 `correctedBq`、`manualAdjusted`，为涌水补 `chainage`，并新增索引。
+- v2 → v3 迁移：新增 `forecasts`、`explanations` 两表，存量数据不受影响。
 - 岩性素描的结构面线段单独存 `localStorage['gbtunnelface:sketch:<faceId>']`，刷新后仍在。
 - 容器无状态、不挂载命名卷；清空站点数据即回到初始示范数据。
-- 首次打开灌入 2 个示范掌子面、4 组节理、1 条级别判定与 3 条涌水记录。
+- 首次打开灌入 2 个示范掌子面、4 组节理、2 条级别判定、3 条涌水记录与 3 份示范预报（相符 / 待说明 / 待编录各一）。
 
 ## 功能要点
 
@@ -94,3 +96,9 @@ sologsb-1122/
 - **素描交互**：`<SketchCanvas>` 在图上单击即按当前岩层产状布置结构面线段，带岩性填充纹样、比例尺、图例与撤销/清空，线段本地持久化。
 - **节理统计**：`<JointPolarPlot>` 等面积投影极点图 + 走向玫瑰图，按组着色；按倾向 30° 聚类支持同组产状合并。
 - **异常提示**：倾角超出 0~90° 直接拦截；涌水量较上一点翻倍或趋势突增标记为突变点并给出措施。
+- **预报对账**：`/forecast` 录入超前地质预报成果（编号、里程段、预报围岩级别、预报涌水），自动与掌子面编录对账：
+  - **认领**：预报编号与掌子面编号一致优先认领，否则按里程段重叠认领（取重叠最长者）；未认领到的预报段列「待编录」，已认领但缺围岩判定的同样列待编录并注明原因。
+  - **比对**：围岩级别差 ≥ 2 级或涌水等级不符即列「待说明」；实测涌水取该掌子面最大估算涌水量按 `<5 干燥 / 5~20 少量 / 20~60 中等 / ≥60 较大`（L/min）分档，无涌水记录按干燥计并标注。
+  - **收口**：待说明记录写清原因与说明人才算「已收口」；说明保存时固化比对指纹（两侧里程、岩性、预报/实测级别与涌水）。
+  - **重算退回**：编录的岩性、里程区间或围岩判定（含涌水记录）更新后指纹失配，已收口的对账自动退回「待说明」并保留原说明备查；差异消失的则重算为「相符」。
+  - **幂等**：预报编号唯一，重复录入按同一份更新，不重复记账。

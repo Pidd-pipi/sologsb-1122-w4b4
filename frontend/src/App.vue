@@ -13,6 +13,7 @@ const activeMenu = computed(() => {
     return '/faces';
   }
   if (route.path.startsWith('/grade')) return '/grade';
+  if (route.path.startsWith('/forecast')) return '/forecast';
   return '/faces';
 });
 
@@ -37,6 +38,7 @@ function onSelect(index: string) {
         <el-menu-item index="/faces/joints">节理产状</el-menu-item>
         <el-menu-item index="/faces/water">涌水记录</el-menu-item>
         <el-menu-item index="/grade">围岩级别</el-menu-item>
+        <el-menu-item index="/forecast">预报对账</el-menu-item>
       </el-menu>
       <el-tag size="small" effect="plain">本地结构版本 v{{ version }}</el-tag>
     </el-header>
