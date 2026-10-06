@@ -3,10 +3,11 @@ import type { TunnelFace } from '../types/face';
 import type { JointSet } from '../types/joint';
 import type { RockMassGrade } from '../types/grade';
 import type { WaterInflow } from '../types/water';
+import type { GeologyForecast, Reconciliation } from '../types/forecast';
 import { newId } from './id';
 
 export const DB_NAME = 'gbtunnelface';
-export const DB_VERSION = 2;
+export const DB_VERSION = 3;
 export const LS_VERSION_KEY = 'gbtunnelface:db-version';
 
 class TunnelFaceDB extends Dexie {
@@ -14,6 +15,8 @@ class TunnelFaceDB extends Dexie {
   joints!: Table<JointSet, string>;
   grades!: Table<RockMassGrade, string>;
   waters!: Table<WaterInflow, string>;
+  forecasts!: Table<GeologyForecast, string>;
+  reconciles!: Table<Reconciliation, string>;
 
   constructor() {
     super(DB_NAME);
@@ -52,6 +55,11 @@ class TunnelFaceDB extends Dexie {
             if (row.chainage === undefined) row.chainage = 0;
           });
       });
+    // v3：新增超前地质预报与预报-编录对账两张表
+    this.version(3).stores({
+      forecasts: 'id, forecastNo, mileageStart, issuedAt',
+      reconciles: 'id, forecastId, faceId, status',
+    });
   }
 }
 
@@ -201,6 +209,22 @@ export async function ensureSeedData(): Promise<void> {
       manualAdjusted: false,
       judgedAt: now - 2 * day,
     },
+    {
+      id: newId('grade'),
+      faceId: face2,
+      grade: 'Ⅴ',
+      bqValue: 232,
+      rqd: 41,
+      jv: 14.8,
+      kv: 0.35,
+      groundwater: '涌流状出水',
+      spanWidth: 12.6,
+      correction: 0.5,
+      correctedBq: 182,
+      supportSuggestion: '超前小导管（φ42，L=4.5 m，环向间距 0.4 m）+ 钢拱架（I18，间距 0.75 m）+ 喷射混凝土 25 cm',
+      manualAdjusted: false,
+      judgedAt: now - 6 * hour,
+    },
   ];
 
   const waters: WaterInflow[] = [
@@ -230,7 +254,7 @@ export async function ensureSeedData(): Promise<void> {
     },
     {
       id: newId('water'),
-      faceId: face1,
+      faceId: face2,
       position: '拱脚左侧',
       type: '股状',
       estimatedFlow: 68,
@@ -242,10 +266,47 @@ export async function ensureSeedData(): Promise<void> {
     },
   ];
 
-  await db.transaction('rw', db.faces, db.joints, db.grades, db.waters, async () => {
+  const forecasts: GeologyForecast[] = [
+    {
+      id: newId('fc'),
+      forecastNo: 'YB-2026-041',
+      mileageStart: 12480,
+      mileageEnd: 12483,
+      grade: 'Ⅲ',
+      water: '点滴状出水',
+      method: 'TSP',
+      forecaster: '超前地质预报组',
+      issuedAt: now - 3 * day,
+    },
+    {
+      id: newId('fc'),
+      forecastNo: 'YB-2026-042',
+      mileageStart: 12483,
+      mileageEnd: 12486,
+      grade: 'Ⅲ',
+      water: '潮湿',
+      method: 'TSP',
+      forecaster: '超前地质预报组',
+      issuedAt: now - day,
+    },
+    {
+      id: newId('fc'),
+      forecastNo: 'YB-2026-043',
+      mileageStart: 12492,
+      mileageEnd: 12495,
+      grade: 'Ⅳ',
+      water: '线状出水',
+      method: '地质雷达',
+      forecaster: '超前地质预报组',
+      issuedAt: now - 2 * hour,
+    },
+  ];
+
+  await db.transaction('rw', db.faces, db.joints, db.grades, db.waters, db.forecasts, async () => {
     await db.faces.bulkPut(faces);
     await db.joints.bulkPut(joints);
     await db.grades.bulkPut(grades);
     await db.waters.bulkPut(waters);
+    await db.forecasts.bulkPut(forecasts);
   });
 }

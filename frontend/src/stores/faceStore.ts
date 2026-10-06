@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
 import { db, toPlain } from '../utils/db';
 import { newId } from '../utils/id';
+import { useForecastStore } from './forecastStore';
 import type { TunnelFace, TunnelFaceDraft } from '../types/face';
 
 interface FaceState {
@@ -26,16 +27,21 @@ export const useFaceStore = defineStore('face', {
       const record: TunnelFace = { ...toPlain(draft), id: newId('face'), recordedAt: Date.now() };
       await db.faces.put(toPlain(record));
       this.items = [...this.items, record].sort((a, b) => b.chainage - a.chainage);
+      // 新编录可能认领走「待编录」的预报段，重算对账
+      await useForecastStore().recomputeAll('新增掌子面编录');
       return record;
     },
     async update(id: string, patch: Partial<TunnelFace>) {
       const plain = toPlain(patch);
       await db.faces.update(id, plain);
       this.items = this.items.map((it) => (it.id === id ? { ...it, ...plain } : it));
+      // 岩性、里程等编录信息更新后，重算对账（已收口的退回待说明）
+      await useForecastStore().recomputeAll('编录信息更新');
     },
     async remove(id: string) {
       await db.faces.delete(id);
       this.items = this.items.filter((it) => it.id !== id);
+      await useForecastStore().recomputeAll('掌子面编录被删除');
     },
     /** 复制上一循环（里程更小的最近一个掌子面）的信息作为草稿 */
     previousDraft(id: string): TunnelFaceDraft | undefined {

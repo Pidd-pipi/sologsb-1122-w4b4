@@ -13,6 +13,7 @@ const activeMenu = computed(() => {
     return '/faces';
   }
   if (route.path.startsWith('/grade')) return '/grade';
+  if (route.path.startsWith('/forecast')) return '/forecast';
   return '/faces';
 });
 
@@ -34,6 +35,7 @@ function onSelect(index: string) {
       <div class="brand">隧道掌子面地质编录台</div>
       <el-menu :default-active="activeMenu" mode="horizontal" class="menu" @select="onSelect">
         <el-menu-item index="/faces">掌子面台账</el-menu-item>
+        <el-menu-item index="/forecast">预报对账</el-menu-item>
         <el-menu-item index="/faces/joints">节理产状</el-menu-item>
         <el-menu-item index="/faces/water">涌水记录</el-menu-item>
         <el-menu-item index="/grade">围岩级别</el-menu-item>

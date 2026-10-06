@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, reactive, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
+import { ElMessage } from 'element-plus';
 import { useFaceStore } from '../stores/faceStore';
 import { useGradeStore } from '../stores/gradeStore';
 import { useJointStore } from '../stores/jointStore';
@@ -9,6 +10,8 @@ import SketchCanvas from '../components/common/SketchCanvas.vue';
 import GradeTag from '../components/common/GradeTag.vue';
 import { attitudeText, formatChainage } from '../utils/geoMath';
 import { GRADE_SUPPORT } from '../types/grade';
+import { EXCAVATION_METHODS, LITHOLOGIES, WEATHERINGS, type TunnelFaceDraft } from '../types/face';
+import { toPlain } from '../utils/db';
 
 const route = useRoute();
 const router = useRouter();
@@ -43,6 +46,55 @@ const gradeCompare = computed(() => {
     : `较上一循环变好 ${-delta} 级：${previousGrade.value.grade} → ${latest.value.grade}`;
 });
 
+/* ---------- 编辑编录信息（更新后自动重算预报对账） ---------- */
+
+const editVisible = ref(false);
+const editError = ref('');
+const editForm = reactive<TunnelFaceDraft>({
+  faceNo: '',
+  chainage: 0,
+  mileageRange: [0, 0],
+  excavationMethod: '台阶法',
+  faceSize: '',
+  lithology: '',
+  weathering: '微风化',
+  rockStrength: 1,
+  attitude: { strike: 0, dipDirection: 0, dipAngle: 0 },
+  geologist: '',
+});
+
+function openEdit() {
+  if (!face.value) return;
+  Object.assign(editForm, toPlain(face.value));
+  editError.value = '';
+  editVisible.value = true;
+}
+
+async function submitEdit() {
+  const current = face.value;
+  if (!current) return;
+  editError.value = '';
+  if (!editForm.faceNo.trim()) {
+    editError.value = '掌子面编号必填';
+    return;
+  }
+  if (faceStore.items.some((it) => it.id !== current.id && it.faceNo === editForm.faceNo.trim())) {
+    editError.value = '掌子面编号已存在，请更换';
+    return;
+  }
+  if (editForm.mileageRange[1] < editForm.mileageRange[0]) {
+    editError.value = '编录里程区间终点不能小于起点';
+    return;
+  }
+  if (editForm.rockStrength <= 0 || editForm.rockStrength > 300) {
+    editError.value = '饱和抗压强度需在 0 ~ 300 MPa 之间';
+    return;
+  }
+  await faceStore.update(current.id, { ...toPlain(editForm), faceNo: editForm.faceNo.trim() });
+  editVisible.value = false;
+  ElMessage.success('编录信息已更新，相关预报对账已自动重算');
+}
+
 onMounted(async () => {
   await faceStore.load();
   await jointStore.load();
@@ -61,6 +113,7 @@ onMounted(async () => {
       <el-tag v-else type="info">未判定级别</el-tag>
       <el-tag type="info" effect="plain">节理 {{ joints.length }} 组</el-tag>
       <div class="spacer" />
+      <el-button v-if="face" @click="openEdit">编辑编录</el-button>
       <el-button type="primary" @click="router.push(`/faces/${faceId}/joints`)">节理录入</el-button>
       <el-button @click="router.push(`/faces/${faceId}/water`)">涌水记录</el-button>
       <el-button @click="router.push(`/grade/${faceId}`)">围岩级别判定</el-button>
@@ -143,6 +196,68 @@ onMounted(async () => {
         />
       </el-card>
     </div>
+
+    <el-dialog v-model="editVisible" title="编辑编录信息" width="700px">
+      <el-alert
+        type="info"
+        :closable="false"
+        show-icon
+        title="岩性、里程等更新保存后，认领本编录的预报对账会自动重算，已收口的将退回待说明"
+        style="margin-bottom: 10px"
+      />
+      <el-alert v-if="editError" :title="editError" type="error" :closable="false" style="margin-bottom: 10px" />
+      <el-form :model="editForm" label-width="120px">
+        <el-form-item label="掌子面编号" required>
+          <el-input v-model="editForm.faceNo" />
+        </el-form-item>
+        <el-form-item label="里程桩号 m">
+          <el-input-number v-model="editForm.chainage" :min="0" :max="999999" :step="1" />
+          <span class="hint">{{ formatChainage(editForm.chainage) }}</span>
+        </el-form-item>
+        <el-form-item label="编录里程区间 m">
+          <el-input-number v-model="editForm.mileageRange[0]" :min="0" :max="999999" />
+          <span style="margin: 0 6px">—</span>
+          <el-input-number v-model="editForm.mileageRange[1]" :min="0" :max="999999" />
+        </el-form-item>
+        <el-form-item label="开挖方式">
+          <el-select v-model="editForm.excavationMethod">
+            <el-option v-for="m in EXCAVATION_METHODS" :key="m" :label="m" :value="m" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="开挖断面尺寸 m">
+          <el-input v-model="editForm.faceSize" placeholder="宽×高，如 12.6×9.8" />
+        </el-form-item>
+        <el-form-item label="岩性">
+          <el-select v-model="editForm.lithology">
+            <el-option v-for="l in LITHOLOGIES" :key="l" :label="l" :value="l" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="风化程度">
+          <el-select v-model="editForm.weathering">
+            <el-option v-for="w in WEATHERINGS" :key="w" :label="w" :value="w" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="饱和抗压强度">
+          <el-input-number v-model="editForm.rockStrength" :min="1" :max="300" :step="1" />
+          <span class="hint">MPa</span>
+        </el-form-item>
+        <el-form-item label="岩层产状">
+          <span class="hint">走向</span>
+          <el-input-number v-model="editForm.attitude.strike" :min="0" :max="360" />
+          <span class="hint">倾向</span>
+          <el-input-number v-model="editForm.attitude.dipDirection" :min="0" :max="360" />
+          <span class="hint">倾角</span>
+          <el-input-number v-model="editForm.attitude.dipAngle" :min="0" :max="90" />
+        </el-form-item>
+        <el-form-item label="地质员">
+          <el-input v-model="editForm.geologist" style="width: 200px" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="editVisible = false">取消</el-button>
+        <el-button type="primary" @click="submitEdit">保存修改</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -185,6 +300,11 @@ onMounted(async () => {
 .muted {
   color: #7b8592;
   font-size: 13px;
+}
+.hint {
+  margin-left: 8px;
+  color: #97a0ad;
+  font-size: 12px;
 }
 .support {
   margin: 8px 0;

@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
 import { db, toPlain } from '../utils/db';
 import { newId } from '../utils/id';
+import { useForecastStore } from './forecastStore';
 import type { RockMassGrade, RockMassGradeDraft } from '../types/grade';
 import type { WaterInflow, WaterInflowDraft } from '../types/water';
 
@@ -32,17 +33,21 @@ export const useGradeStore = defineStore('grade', {
       const record: RockMassGrade = { ...toPlain(draft), id: newId('grade'), judgedAt: Date.now() };
       await db.grades.put(toPlain(record));
       this.items = [record, ...this.items];
+      // 围岩判定更新后，重算对账（已收口的退回待说明）
+      await useForecastStore().recomputeAll('围岩级别判定更新');
       return record;
     },
     async addWater(draft: WaterInflowDraft) {
       const record: WaterInflow = { ...toPlain(draft), id: newId('water'), measuredAt: Date.now() };
       await db.waters.put(toPlain(record));
       this.waters = [...this.waters, record].sort((a, b) => a.chainage - b.chainage);
+      await useForecastStore().recomputeAll('涌水记录更新');
       return record;
     },
     async removeWater(id: string) {
       await db.waters.delete(id);
       this.waters = this.waters.filter((it) => it.id !== id);
+      await useForecastStore().recomputeAll('涌水记录更新');
     },
   },
 });
